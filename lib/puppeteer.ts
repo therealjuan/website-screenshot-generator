@@ -8,7 +8,7 @@ const TINYPNG_API_KEY = process.env.TINYPNG_API_KEY!;
 
 export async function captureScreenshot(url: string): Promise<string> {
   const browser = await puppeteer.launch({
-    headless: 'shell',
+    headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
     defaultViewport: {
       width: 1920,
