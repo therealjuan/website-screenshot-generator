@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
+import chromium from 'chrome-aws-lambda';
+import puppeteer from 'puppeteer-core';
 import { PuppeteerBlocker } from '@cliqz/adblocker-puppeteer';
 import fetch from 'cross-fetch';
 import axios from 'axios';
@@ -8,9 +9,6 @@ const TINYPNG_API_KEY = process.env.TINYPNG_API_KEY!;
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const blocker = await PuppeteerBlocker.fromLists(fetch, [
-    'https://secure.fanboy.co.nz/fanboy-cookiemonster.txt'
-]);
   const url = body.url;
 
   if (!url || typeof url !== 'string') {
@@ -18,23 +16,34 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const browser = await puppeteer.launch({ 
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        headless: 'shell'
+    const executablePath = await chromium.executablePath;
+
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: { width: 1920, height: 1080, deviceScaleFactor: 2 },
+      executablePath,
+      headless: chromium.headless,
     });
-    
+
     const page = await browser.newPage();
+
+    // Enable ad & cookie blocking
+    const blocker = await PuppeteerBlocker.fromLists(fetch, [
+      'https://easylist.to/easylist/easylist.txt',
+      'https://easylist.to/easylist/easyprivacy.txt',
+      'https://secure.fanboy.co.nz/fanboy-cookiemonster.txt',
+    ]);
     await blocker.enableBlockingInPage(page);
 
-    await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 2 });
-    await page.goto(/^https?:\/\//.test(url) ? url : `https://${url}`, { waitUntil: ['load', 'domcontentloaded', 'networkidle0'] });
-    await page.screenshot({ type: 'png', path: 'screenshot.png' });
-    
-    const screenshotBuffer = await page.screenshot({
-        type: 'png',
-        fullPage: false,
+    await page.goto(/^https?:\/\//.test(url) ? url : `https://${url}`, {
+      waitUntil: ['load', 'domcontentloaded', 'networkidle0'],
     });
-    
+
+    const screenshotBuffer = await page.screenshot({
+      type: 'png',
+      fullPage: false,
+    });
+
     await browser.close();
 
     // Upload to TinyPNG
@@ -51,7 +60,6 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // Get optimized image
     const compressedImage = await axios.get(uploadRes.data.output.url, {
       responseType: 'arraybuffer',
     });
@@ -61,6 +69,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ screenshot: base64Compressed });
   } catch (err: any) {
     console.error(err);
-    return NextResponse.json({ error: 'Screenshot or compression failed', details: err.message }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Screenshot or compression failed', details: err.message },
+      { status: 500 }
+    );
   }
 }
